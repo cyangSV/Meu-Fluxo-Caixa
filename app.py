@@ -15,11 +15,14 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_dados():
     try:
-        # ttl="0s" obriga o app a buscar o dado mais novo no Google sem usar cache
-        return conn.read(ttl="0s")
-    except:
-        # Se a planilha estiver vazia ou der erro, cria as colunas padrão
-        return pd.DataFrame(columns=['Data', 'Funcionária', 'Dinheiro', 'Débito', 'Crédito', 'Pix', 'Quebra', 'Retirada', 'Justificativa'])
+        df = conn.read(ttl="0s")
+        # Se a planilha existir mas não tiver a coluna 'Data', força a criação
+        if df is None or 'Data' not in df.columns:
+            return pd.DataFrame(columns=COLUNAS)
+        return df
+    except Exception:
+        # Em caso de qualquer erro de conexão, retorna o formato vazio correto
+        return pd.DataFrame(columns=COLUNAS)
 
 def salvar_dados(df_novo):
     # Envia a tabela inteira atualizada para o Google Sheets
@@ -223,4 +226,5 @@ with aba_mensal:
                 dias = df_mes_tabela['Data'].nunique()
                 media = df_mes_tabela['Total Dia'].sum() / dias if dias > 0 else 0
                 st.markdown(f"<div class='caixa-roxa'><span>Dias com Registro</span><span>{dias}</span></div>", unsafe_allow_html=True)
+
                 st.markdown(f"<div class='caixa-verde-clara'><span>Média por Dia</span><span>R$ {media:.2f}</span></div>", unsafe_allow_html=True)
