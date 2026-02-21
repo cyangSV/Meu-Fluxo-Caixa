@@ -15,19 +15,26 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_dados():
     try:
+        # Tenta ler os dados. Se falhar ou não tiver a coluna 'Data', cria do zero.
         df = conn.read(ttl="0s")
-        # Se a planilha existir mas não tiver a coluna 'Data', força a criação
-        if df is None or 'Data' not in df.columns:
+        if df is None or df.empty or 'Data' not in df.columns:
             return pd.DataFrame(columns=COLUNAS)
         return df
-    except Exception:
-        # Em caso de qualquer erro de conexão, retorna o formato vazio correto
+    except Exception as e:
         return pd.DataFrame(columns=COLUNAS)
 
 def salvar_dados(df_novo):
-    # Envia a tabela inteira atualizada para o Google Sheets
-    conn.update(data=df_novo)
-    st.cache_data.clear()
+    try:
+        # Limpa linhas totalmente vazias antes de salvar para não sujar a planilha
+        df_limpo = df_novo.dropna(subset=['Funcionária'])
+        df_limpo = df_limpo[df_limpo['Funcionária'].str.strip() != '']
+        
+        # Envia para o Google
+        conn.update(data=df_limpo)
+        st.cache_data.clear()
+        st.success("✅ Salvo com sucesso no Google Sheets!")
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar: Verifique se a planilha está como 'Editor'.")
 
 # --- 3. ESTILOS VISUAIS (O design que você criou) ---
 st.markdown("""
@@ -228,3 +235,4 @@ with aba_mensal:
                 st.markdown(f"<div class='caixa-roxa'><span>Dias com Registro</span><span>{dias}</span></div>", unsafe_allow_html=True)
 
                 st.markdown(f"<div class='caixa-verde-clara'><span>Média por Dia</span><span>R$ {media:.2f}</span></div>", unsafe_allow_html=True)
+
