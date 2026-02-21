@@ -8,8 +8,8 @@ st.set_page_config(page_title="Fluxo de Caixa 2026", layout="wide", initial_side
 if 'atualizador' not in st.session_state:
     st.session_state['atualizador'] = 0
 
-# --- 2. CONSTANTES PADRONIZADAS (PIX em maiúsculo) ---
-COLUNAS = ['Data', 'Funcionária', 'Dinheiro', 'Débito', 'Crédito', 'PIX', 'Quebra', 'Retirada', 'Justificativa']
+# --- 2. CONSTANTES ---
+COLUNAS_OBRIGATORIAS = ['Data', 'Funcionária', 'Dinheiro', 'Débito', 'Crédito', 'PIX', 'Quebra', 'Retirada', 'Justificativa']
 
 # --- 3. CONEXÃO COM GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -17,24 +17,32 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def carregar_dados():
     try:
         df = conn.read(ttl="0s")
-        if df is None or df.empty or 'Data' not in df.columns:
-            return pd.DataFrame(columns=COLUNAS)
-        return df
+        if df is None or df.empty:
+            return pd.DataFrame(columns=COLUNAS_OBRIGATORIAS)
+        
+        # BLINDAGEM: Garante que todas as colunas existam, independente do que está no Google
+        for col in COLUNAS_OBRIGATORIAS:
+            if col not in df.columns:
+                df[col] = 0.0
+        
+        return df[COLUNAS_OBRIGATORIAS] # Garante a ordem correta
     except:
-        return pd.DataFrame(columns=COLUNAS)
+        return pd.DataFrame(columns=COLUNAS_OBRIGATORIAS)
 
 def salvar_dados(df_novo):
     try:
         df_salvar = df_novo.copy()
         df_salvar['Funcionária'] = df_salvar['Funcionária'].fillna('').astype(str)
+        # Salva apenas quem tem nome de funcionária
         df_salvar = df_salvar[df_salvar['Funcionária'].str.strip() != '']
+        
         conn.update(data=df_salvar)
         st.cache_data.clear()
         st.success("✅ Sincronizado com o Google Sheets!")
     except Exception as e:
-        st.error("❌ Erro ao salvar: Verifique se a conta de serviço é 'Editor' na planilha.")
+        st.error("❌ Erro de permissão. Verifique se a conta de serviço é 'Editor' na planilha.")
 
-# --- 4. ESTILOS VISUAIS (Design) ---
+# --- 4. ESTILOS VISUAIS ---
 st.markdown("""
     <style>
     .caixa-vermelha { background-color: #FFF0F0; color: #D32F2F; padding: 15px; border-radius: 8px; font-weight: bold; border: 1px solid #FFCDD2; margin-bottom: 10px; display: flex; justify-content: space-between;}
@@ -42,7 +50,6 @@ st.markdown("""
     .caixa-roxa { background-color: #F3E5F5; color: #4A148C; padding: 15px; border-radius: 8px; font-weight: bold; border: 1px solid #E1BEE7; margin-bottom: 10px; display: flex; justify-content: space-between;}
     .caixa-verde { background-color: #E8F5E9; color: #1B5E20; padding: 15px; border-radius: 8px; font-weight: bold; border: 1px solid #C8E6C9; margin-bottom: 10px; display: flex; justify-content: space-between;}
     .texto-cinza { color: #78909C; font-size: 12px; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; }
-    .valor-grande { font-size: 24px; font-weight: bold; color: #1E1E1E; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -57,8 +64,6 @@ config_tab = {
     "PIX": st.column_config.NumberColumn("PIX", format="%.2f"),
     "Quebra": st.column_config.NumberColumn("QUEBRA", format="%.2f"),
     "Retirada": st.column_config.NumberColumn("RETIRADA", format="%.2f"),
-    "Esperado": st.column_config.NumberColumn("ESPERADO", format="R$ %.2f"),
-    "Total Dia": st.column_config.NumberColumn("TOTAL DIA", format="R$ %.2f")
 }
 
 aba_diario, aba_mensal = st.tabs(["❖ Diário", "📅 Mensal"])
@@ -70,27 +75,26 @@ with aba_diario:
     c_t, c_v, c_d = st.columns([2, 1, 1])
     data_sel = c_d.date_input("Data:", format="DD/MM/YYYY", label_visibility="collapsed")
     data_str = data_sel.strftime("%Y-%m-%d")
-    c_t.markdown(f"## Fluxo de Caixa")
-    c_t.markdown(f"Gestão diária de fechamentos e turnos")
-
+    
     df_dia = df_completo[df_completo['Data'] == data_str].copy()
+    
+    # Preenchimento automático de 8 linhas
     if len(df_dia) < 8:
         vazios = pd.DataFrame([{'Data': data_str, 'Funcionária': '', 'Dinheiro': 0.0, 'Débito': 0.0, 'Crédito': 0.0, 'PIX': 0.0, 'Quebra': 0.0, 'Retirada': 0.0, 'Justificativa': ''} for _ in range(8 - len(df_dia))])
         df_dia = pd.concat([df_dia, vazios], ignore_index=True)
 
-    df_dia['Esperado'] = df_dia['Dinheiro'] + df_dia['Débito'] + df_dia['Crédito'] + df_dia['PIX']
-
-    # Cards Resumo
+    # Cards Resumo Topo
     r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Dinheiro", f"R$ {df_dia['Dinheiro'].sum():.2f}")
-    r2.metric("Débito", f"R$ {df_dia['Débito'].sum():.2f}")
-    r3.metric("Crédito", f"R$ {df_dia['Crédito'].sum():.2f}")
-    r4.metric("PIX", f"R$ {df_dia['PIX'].sum():.2f}")
+    r1.metric("Total Dinheiro", f"R$ {df_dia['Dinheiro'].sum():.2f}")
+    r2.metric("Total Débito", f"R$ {df_dia['Débito'].sum():.2f}")
+    r3.metric("Total Crédito", f"R$ {df_dia['Crédito'].sum():.2f}")
+    r4.metric("Total PIX", f"R$ {df_dia['PIX'].sum():.2f}")
 
     with st.form("form_diario"):
         st.markdown(f"### Lançamentos: {data_sel.strftime('%d/%m/%Y')}")
         df_editado = st.data_editor(df_dia, use_container_width=True, hide_index=False, column_config=config_tab, num_rows="dynamic", key=f"ed_{data_str}_{st.session_state.atualizador}")
-        if st.form_submit_button("💾 SALVAR FECHAMENTO", type="primary", use_container_width=True):
+        
+        if st.form_submit_button("💾 SALVAR TUDO", type="primary", use_container_width=True):
             df_restante = df_completo[df_completo['Data'] != data_str]
             df_final = pd.concat([df_restante, df_editado], ignore_index=True)
             salvar_dados(df_final)
@@ -131,17 +135,18 @@ with aba_mensal:
             mes_sel = m_col1.selectbox("Selecione o Mês:", meses)
             df_mes = df_completo[df_completo['AnoMes'] == mes_sel].copy()
             
-            # Cálculo do Total Dia (Garante que colunas existem)
+            # Cálculo do Total Dia (Garante que colunas existem e são números)
             for c in ['Dinheiro', 'Débito', 'Crédito', 'PIX']:
                 df_mes[c] = pd.to_numeric(df_mes[c], errors='coerce').fillna(0)
+            
             df_mes['Total Dia'] = df_mes['Dinheiro'] + df_mes['Débito'] + df_mes['Crédito'] + df_mes['PIX']
 
             # Cards Mensais
             m1, m2, m3, m4 = st.columns(4)
-            with m1: st.markdown(f"<div class='texto-cinza'>Mensal Dinheiro</div><div class='valor-grande'>R$ {df_mes['Dinheiro'].sum():.2f}</div>", unsafe_allow_html=True)
-            with m2: st.markdown(f"<div class='texto-cinza'>Mensal Débito</div><div class='valor-grande'>R$ {df_mes['Débito'].sum():.2f}</div>", unsafe_allow_html=True)
-            with m3: st.markdown(f"<div class='texto-cinza'>Mensal Crédito</div><div class='valor-grande'>R$ {df_mes['Crédito'].sum():.2f}</div>", unsafe_allow_html=True)
-            with m4: st.markdown(f"<div class='texto-cinza'>Mensal PIX</div><div class='valor-grande'>R$ {df_mes['PIX'].sum():.2f}</div>", unsafe_allow_html=True)
+            m1.metric("Mensal Dinheiro", f"R$ {df_mes['Dinheiro'].sum():.2f}")
+            m2.metric("Mensal Débito", f"R$ {df_mes['Débito'].sum():.2f}")
+            m3.metric("Mensal Crédito", f"R$ {df_mes['Crédito'].sum():.2f}")
+            m4.metric("Mensal PIX", f"R$ {df_mes['PIX'].sum():.2f}")
 
             st.write("")
             st.markdown(f"### Lançamentos de {mes_sel}")
@@ -158,12 +163,12 @@ with aba_mensal:
                         st.markdown(f"<div class='caixa-vermelha'><span>{row['Funcionária']}</span><span>R$ {row['Quebra']:.2f}</span></div>", unsafe_allow_html=True)
                 else:
                     st.info("Nenhuma quebra registrada este mês.")
-                st.caption("Nota: Este relatório consolida as sugestões de desconto.")
 
             with col_rel2:
                 st.markdown("### Resumo Mensal")
                 d_reg = df_mes['Data'].nunique()
-                media_d = df_mes['Total Dia'].sum() / d_reg if d_reg > 0 else 0
+                t_faturamento = df_mes['Total Dia'].sum()
+                media_d = t_faturamento / d_reg if d_reg > 0 else 0
                 st.markdown(f"<div class='caixa-roxa'><span>Dias com Registro</span><span>{d_reg}</span></div>", unsafe_allow_html=True)
                 st.markdown(f"<div class='caixa-verde'><span>Média por Dia</span><span>R$ {media_d:.2f}</span></div>", unsafe_allow_html=True)
         else:
